@@ -21,32 +21,40 @@ const mfaConfig = "/mfa-cfg.csv" // todo, change to be variable
 
 func main() {
 
-	// AWSCredentialFilePath := usr.HomeDir + "/.aws/credentials" // TODO, unfuck somehow
-	// AWSConfigFilePath := usr.HomeDir + "/.aws/config"
+	// awsCredentialFilePath := usr.HomeDir + "/.aws/credentials" // TODO, unfuck somehow
+	// awsConfigFilePath := usr.HomeDir + "/.aws/config"
 
-	ex, err := os.Executable()
+	awsCredentialFilePath, awsConfigFilePath := getAWSFilePaths()
+
+	// ex, err := os.Executable()
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// exPath := filepath.Dir(ex)
+	// awsCredentialFilePath := exPath + "/credentials"
+	// outawsCredentialFilePath := exPath + "/credentials-out" // for debug, TODO remove
+	// awsCredentialFilePath := exPath + "/credentials-in-place"
+	// outawsCredentialFilePath := exPath + "/credentials-in-place" // for debug, TODO remove
+
+	fmt.Println(awsCredentialFilePath)
+
+	// awsConfigFilePath := exPath + "/config"  TODO
+
+	awsCredINI, err := ini.Load(awsCredentialFilePath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Errorf("error opening credentials file: %v", err))
 	}
-	exPath := filepath.Dir(ex)
-	// AWSCredentialFilePath := exPath + "/credentials"
-	// outAWSCredentialFilePath := exPath + "/credentials-out" // for debug, TODO remove
-	AWSCredentialFilePath := exPath + "/credentials-in-place"
-	outAWSCredentialFilePath := exPath + "/credentials-in-place" // for debug, TODO remove
 
-	fmt.Println(AWSCredentialFilePath)
-
-	// AWSConfigFilePath := exPath + "/config"  TODO
-
-	credConfig, err := ini.Load(AWSCredentialFilePath)
+	awsConfigINI, err := ini.Load(awsConfigFilePath)
 	if err != nil {
 		log.Fatal(fmt.Errorf("error opening credentials file: %v", err))
 	}
 
 	// check that args given make sense,
-	profile, mfaCode, mfaDevice := getArgs(credConfig) // TODO, use a struct instead of this.
+	profile, mfaCode, mfaDevice := getArgs(awsCredINI) // TODO, use a struct instead of this.
+	// TODO, validate the config file also - is there a config file entry?
 
-	mfaProfileExists := checkMFAProfileExists(profile, credConfig)
+	mfaProfileExists := checkMFAProfileExists(profile, awsCredINI)
 
 	// validate mfaCode
 	validateMFACode(mfaCode)
@@ -56,7 +64,7 @@ func main() {
 
 	// get temp creds from STS
 	stsClient := sts.New(session.Must(session.NewSession(&aws.Config{
-		Credentials: getCredentials(mfaProfileExists, AWSCredentialFilePath, profile),
+		Credentials: getCredentials(mfaProfileExists, awsCredentialFilePath, profile),
 	})))
 
 	var tokenDuration int64 = 43200
@@ -84,40 +92,54 @@ func main() {
 	if mfaProfileExists == true {
 		// if the mfaProfileExists, assume that we've been here before, and it is source creds.
 
-		writeCredentialsToSection(credConfig.Section(profile), output.Credentials)
+		writeCredentialsToSection(awsCredINI.Section(profile), output.Credentials)
 
-		credConfig.SaveTo(outAWSCredentialFilePath)
+		awsCredINI.SaveTo(awsCredentialFilePath)
 
 		fmt.Printf("\nSuccessfully used \"%v\" profile to create temp mfa credentials at \"%v\" profile", "mfa-"+profile, profile)
-		fmt.Println("output file:" + outAWSCredentialFilePath)
+		fmt.Println("output file:" + awsCredentialFilePath)
 
 	} else {
 		// if profile hasn't been done before
 		// 	copy source profile to mfa-${source}
 
 		newSourceProfileName := "mfa-" + profile
-		newSourceProfileSection, err := credConfig.NewSection(newSourceProfileName)
 
-		oldSourceProfileSection := credConfig.Section(profile)
+		for _, INIfile := range []*ini.File{awsCredINI, awsConfigINI} {
+			newSourceProfileSection, err := INIfile.NewSection(newSourceProfileName)
 
-		if err != nil {
-			log.Fatal("ERROR creating new profile section:", err)
+			oldSourceProfileSection := INIfile.Section(profile)
+
+			if err != nil {
+				log.Fatal("ERROR creating new profile section:", err)
+			}
+
+			err = copyINISection(oldSourceProfileSection, newSourceProfileSection)
+
+			if err != nil {
+				log.Fatal("ERROR copying source profile credentials to dest: ", err)
+			}
+
+			//	overwrite source profile with target credentials
+
+			writeCredentialsToSection(oldSourceProfileSection, output.Credentials)
 		}
 
-		err = copyINISection(oldSourceProfileSection, newSourceProfileSection)
-
-		if err != nil {
-			log.Fatal("ERROR copying source profile credentials to dest: ", err)
-		}
-
-		//	overwrite source profile with target credentials
-
-		writeCredentialsToSection(oldSourceProfileSection, output.Credentials)
-
-		credConfig.SaveTo(outAWSCredentialFilePath)
+		awsCredINI.SaveTo(awsCredentialFilePath)
 		fmt.Printf("\nSuccessfully copied \"%v\" profile to \"%v\" profile, and saved temp mfa credentials to \"%v\" profile", profile, newSourceProfileName, profile)
-		fmt.Println("output file:" + outAWSCredentialFilePath)
+		fmt.Println("output file:" + awsCredentialFilePath)
 	}
+}
+
+func getAWSFilePaths() (awsCredentialFilePath string, awsConfigFilePath string) {
+
+	homeDir, err := os.UserHomeDir()
+
+	if err != nil {
+		log.Fatal("Error finding user homedir: ", err)
+	}
+
+	return homeDir + "/.aws/credentials", homeDir + "/.aws/config"
 
 }
 
@@ -128,27 +150,26 @@ func writeCredentialsToSection(section *ini.Section, creds *sts.Credentials) {
 	section.Key("aws_session_token").SetValue(*creds.SessionToken)
 }
 
-func getCredentials(mfaProfileExists bool, AWSCredentialFilePath string, profile string) *credentials.Credentials {
+func getCredentials(mfaProfileExists bool, awsCredentialFilePath string, profile string) *credentials.Credentials {
 	if mfaProfileExists == true {
-		fmt.Printf("getting creds for profile \"%v\" from file %v\n", "mfa-"+profile, AWSCredentialFilePath)
-		return credentials.NewSharedCredentials(AWSCredentialFilePath, "mfa-"+profile)
+		fmt.Printf("getting creds for profile \"%v\" from file %v\n", "mfa-"+profile, awsCredentialFilePath)
+		return credentials.NewSharedCredentials(awsCredentialFilePath, "mfa-"+profile)
 	} else {
-		fmt.Printf("getting creds for profile %v from file %v\n", profile, AWSCredentialFilePath)
-		return credentials.NewSharedCredentials(AWSCredentialFilePath, profile)
+		fmt.Printf("getting creds for profile %v from file %v\n", profile, awsCredentialFilePath)
+		return credentials.NewSharedCredentials(awsCredentialFilePath, profile)
 	}
 }
 
-func checkMFAProfileExists(profile string, credConfig *ini.File) bool {
-	if stringInSlice("mfa-"+profile, credConfig.SectionStrings()) == true {
-		fmt.Println("mfa profile exists")
+func checkMFAProfileExists(profile string, iniFile *ini.File) bool {
+	if stringInSlice("mfa-"+profile, iniFile.SectionStrings()) == true {
 		return true
 	}
-	fmt.Println("mfa profile does not exist")
+	fmt.Println("mfa profile does not exist, attempting to create")
 	return false
 }
 
 //
-func getArgs(credConfig *ini.File) (profile string, mfaCode string, mfaDevice string) {
+func getArgs(awsCredINI *ini.File) (profile string, mfaCode string, mfaDevice string) {
 	flag.Parse()
 	args := flag.Args()
 
@@ -171,7 +192,7 @@ where <mfa-code> is a 6 digit mfa code, likely from your mobile device or 1passw
 	// 1 arg, assume default profile
 	if len(args) == 1 {
 		fmt.Println("No profile given, using default profiles")
-		profile := getDefaultProfile(credConfig)
+		profile := getDefaultProfile(awsCredINI)
 
 		return profile, args[0], getMFADevice(profile)
 	}
@@ -198,7 +219,7 @@ func copyINISection(sourceSection *ini.Section, targetSection *ini.Section) erro
 	return nil
 }
 
-func getDefaultProfile(credConfig *ini.File) string {
+func getDefaultProfile(awsCredINI *ini.File) string {
 
 	defaultProfilesOrder := []string{"default", "mfa-default"}
 
@@ -207,7 +228,7 @@ func getDefaultProfile(credConfig *ini.File) string {
 	for _, v := range defaultProfilesOrder {
 
 		// works because only err possible is "section does not exist"
-		profileSection, err := credConfig.GetSection(v)
+		profileSection, err := awsCredINI.GetSection(v)
 		if err != nil {
 			fmt.Printf("default profile %v does not exist in credentials file \n", v)
 			continue
