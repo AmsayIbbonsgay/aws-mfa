@@ -17,30 +17,15 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-const mfaConfig = "/mfa-cfg.csv" // todo, change to be variable
+const mfaConfig = "/mfa-cfg.csv"
 
 var tokenDuration int64 = 43200
 
 func main() {
 
-	// awsCredentialFilePath := usr.HomeDir + "/.aws/credentials" // TODO, unfuck somehow
-	// awsConfigFilePath := usr.HomeDir + "/.aws/config"
-
 	awsCredentialFilePath, awsConfigFilePath := getAWSFilePaths()
 
-	// ex, err := os.Executable()
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// exPath := filepath.Dir(ex)
-	// awsCredentialFilePath := exPath + "/credentials"
-	// outawsCredentialFilePath := exPath + "/credentials-out" // for debug, TODO remove
-	// awsCredentialFilePath := exPath + "/credentials-in-place"
-	// outawsCredentialFilePath := exPath + "/credentials-in-place" // for debug, TODO remove
-
 	fmt.Println(awsCredentialFilePath)
-
-	// awsConfigFilePath := exPath + "/config"  TODO
 
 	awsCredINI, err := ini.Load(awsCredentialFilePath)
 	if err != nil {
@@ -53,12 +38,10 @@ func main() {
 	}
 
 	// check that args given make sense,
-	profile, mfaCode, mfaDevice := getArgs(awsCredINI) // TODO, use a struct instead of this.
-	// TODO, validate the config file also - is there a config file entry?
+	profile, mfaCode, mfaDevice := getArgs(awsCredINI)
 
 	mfaProfileExists := checkMFAProfileExists(profile, awsCredINI)
 
-	// validate mfaCode
 	validateMFACode(mfaCode)
 	if err != nil {
 		log.Fatal(err)
@@ -239,7 +222,7 @@ func getDefaultProfile(awsCredINI *ini.File) string {
 	return "" // dummy for happy compiler
 }
 
-// Given a section, validates that it has the correct keys, and values match regex. Returns nil if a-ok
+// Given a section, validates that it has the correct keys, returns nil if a-ok
 func validateProfileSection(profileSection *ini.Section) error {
 
 	requiredFields := []string{"aws_access_key_id", "aws_secret_access_key"}
