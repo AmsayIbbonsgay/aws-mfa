@@ -19,6 +19,8 @@ import (
 
 const mfaConfig = "/mfa-cfg.csv" // todo, change to be variable
 
+var tokenDuration int64 = 43200
+
 func main() {
 
 	// awsCredentialFilePath := usr.HomeDir + "/.aws/credentials" // TODO, unfuck somehow
@@ -62,37 +64,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// get temp creds from STS
-	stsClient := sts.New(session.Must(session.NewSession(&aws.Config{
-		Credentials: getCredentials(mfaProfileExists, awsCredentialFilePath, profile),
-	})))
-
-	var tokenDuration int64 = 43200
-
-	tokenRequest := sts.GetSessionTokenInput{
-		DurationSeconds: &tokenDuration,
-		SerialNumber:    &mfaDevice,
-		TokenCode:       &mfaCode,
-	}
-
-	output, err := stsClient.GetSessionToken(&tokenRequest)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// if the profile name starts with mfa, inform user that they've messed up. TODO, move whole thing to getArgs()
-
-	// matched, err := regexp.Match(`^mfa-*`, []byte(profile))
-
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
 	if mfaProfileExists == true {
 		// if the mfaProfileExists, assume that we've been here before, and it is source creds.
 
-		writeCredentialsToSection(awsCredINI.Section(profile), output.Credentials)
+		tempCreds := getTempCredentials(mfaDevice, mfaCode, awsCredentialFilePath, "mfa-"+profile)
+
+		writeCredentialsToSection(awsCredINI.Section(profile), tempCreds)
 
 		awsCredINI.SaveTo(awsCredentialFilePath)
 
@@ -121,14 +98,35 @@ func main() {
 			}
 
 			//	overwrite source profile with target credentials
-
-			writeCredentialsToSection(oldSourceProfileSection, output.Credentials)
+			tempCreds := getTempCredentials(mfaDevice, mfaCode, awsCredentialFilePath, profile)
+			writeCredentialsToSection(oldSourceProfileSection, tempCreds)
+			INIfile.SaveTo(awsCredentialFilePath) // todo you're dumb
 		}
 
-		awsCredINI.SaveTo(awsCredentialFilePath)
-		fmt.Printf("\nSuccessfully copied \"%v\" profile to \"%v\" profile, and saved temp mfa credentials to \"%v\" profile", profile, newSourceProfileName, profile)
+		fmt.Printf("\nSuccessfully copied \"%v\" profile to \"%v\" profile, and saved temp mfa credentials to \"%v\" profile\n", profile, newSourceProfileName, profile)
 		fmt.Println("output file:" + awsCredentialFilePath)
 	}
+}
+
+func getTempCredentials(mfaDevice string, mfaCode string, awsCredentialFilePath string, profile string) *sts.Credentials {
+
+	stsClient := sts.New(session.Must(session.NewSession(&aws.Config{
+		Credentials: credentials.NewSharedCredentials(awsCredentialFilePath, profile),
+	})))
+
+	tokenRequest := sts.GetSessionTokenInput{
+		DurationSeconds: &tokenDuration,
+		SerialNumber:    &mfaDevice,
+		TokenCode:       &mfaCode,
+	}
+
+	output, err := stsClient.GetSessionToken(&tokenRequest)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return output.Credentials
 }
 
 func getAWSFilePaths() (awsCredentialFilePath string, awsConfigFilePath string) {
@@ -148,16 +146,6 @@ func writeCredentialsToSection(section *ini.Section, creds *sts.Credentials) {
 	section.Key("aws_access_key_id").SetValue(*creds.AccessKeyId)
 	section.Key("aws_secret_access_key").SetValue(*creds.SecretAccessKey)
 	section.Key("aws_session_token").SetValue(*creds.SessionToken)
-}
-
-func getCredentials(mfaProfileExists bool, awsCredentialFilePath string, profile string) *credentials.Credentials {
-	if mfaProfileExists == true {
-		fmt.Printf("getting creds for profile \"%v\" from file %v\n", "mfa-"+profile, awsCredentialFilePath)
-		return credentials.NewSharedCredentials(awsCredentialFilePath, "mfa-"+profile)
-	} else {
-		fmt.Printf("getting creds for profile %v from file %v\n", profile, awsCredentialFilePath)
-		return credentials.NewSharedCredentials(awsCredentialFilePath, profile)
-	}
 }
 
 func checkMFAProfileExists(profile string, iniFile *ini.File) bool {
@@ -311,16 +299,3 @@ func getMFADevice(profile string) string {
 	log.Fatal(fmt.Sprintf("profile %v not found in mfa config file %v ", profile, configFile))
 	return "" // for make compiler happy
 }
-
-// take in one optional arg (profile), and one required arg (mfa code)
-
-// find the location of the aws config and credentials files
-
-// read the INI format of these files
-
-// func handleFatalError(prefix string, err error) {
-// 	if err != nil {
-// 		fmt.Println(prefix, err)
-// 		os.Exit(1)   TODO
-// 	}
-// }
