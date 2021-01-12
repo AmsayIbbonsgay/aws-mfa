@@ -1,4 +1,4 @@
-module github.com/AmsayIbbonsgay/aws-mfa-buddy
+module github.com/AmsayIbbonsgay/aws-mfa
 
 go 1.15
 
