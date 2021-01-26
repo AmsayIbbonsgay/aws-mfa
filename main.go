@@ -25,70 +25,97 @@ func main() {
 
 	awsCredentialFilePath, awsConfigFilePath := getAWSFilePaths()
 
-	fmt.Println(awsCredentialFilePath)
+	// fmt.Println(awsCredentialFilePath)
 
-	awsCredINI, err := ini.Load(awsCredentialFilePath)
-	if err != nil {
-		log.Fatal(fmt.Errorf("error opening credentials file: %v", err))
-	}
-
-	awsConfigINI, err := ini.Load(awsConfigFilePath)
-	if err != nil {
-		log.Fatal(fmt.Errorf("error opening credentials file: %v", err))
-	}
+	awsCredINI := getIniFile(awsCredentialFilePath)
+	awsConfigINI := getIniFile(awsConfigFilePath)
 
 	// check that args given make sense,
-	profile, mfaCode, mfaDevice := getArgs(awsCredINI)
+	profile, mfaCode, mfaDevice := getArgs(awsCredINI.file)
 
-	mfaProfileExists := checkMFAProfileExists(profile, awsCredINI)
+	mfaProfileExists := checkMFAProfileExists(profile, awsCredINI.file)
 
 	validateMFACode(mfaCode)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	if mfaProfileExists == true {
 		// if the mfaProfileExists, assume that we've been here before, and it is source creds.
 
 		tempCreds := getTempCredentials(mfaDevice, mfaCode, awsCredentialFilePath, "mfa-"+profile)
 
-		writeCredentialsToSection(awsCredINI.Section(profile), tempCreds)
+		writeCredentialsToSection(awsCredINI.file.Section(profile), tempCreds)
 
-		awsCredINI.SaveTo(awsCredentialFilePath)
+		awsCredINI.save()
 
-		fmt.Printf("\nSuccessfully used \"%v\" profile to create temp mfa credentials at \"%v\" profile", "mfa-"+profile, profile)
-		fmt.Println("output file:" + awsCredentialFilePath)
+		fmt.Printf("\nSuccessfully used \"%v\" profile to create temp mfa credentials at \"%v\" profile\n", "mfa-"+profile, profile)
+		fmt.Println("output file:" + awsCredINI.path)
 
 	} else {
 		// if profile hasn't been done before
 		// 	copy source profile to mfa-${source}
+		// I also do this for the config file, in case it needs to be operational
 
-		newSourceProfileName := "mfa-" + profile
+		// credential file
+		oldCredProfileSection := awsCredINI.file.Section(profile)
 
-		for _, INIfile := range []*ini.File{awsCredINI, awsConfigINI} {
-			newSourceProfileSection, err := INIfile.NewSection(newSourceProfileName)
+		err := awsCredINI.copyINISection(profile, "mfa-"+profile)
 
-			oldSourceProfileSection := INIfile.Section(profile)
-
-			if err != nil {
-				log.Fatal("ERROR creating new profile section:", err)
-			}
-
-			err = copyINISection(oldSourceProfileSection, newSourceProfileSection)
-
-			if err != nil {
-				log.Fatal("ERROR copying source profile credentials to dest: ", err)
-			}
-
-			//	overwrite source profile with target credentials
-			tempCreds := getTempCredentials(mfaDevice, mfaCode, awsCredentialFilePath, profile)
-			writeCredentialsToSection(oldSourceProfileSection, tempCreds)
-			INIfile.SaveTo(awsCredentialFilePath) // todo you're dumb
+		if err != nil {
+			log.Fatal("ERROR copying credential sections:", err)
 		}
 
-		fmt.Printf("\nSuccessfully copied \"%v\" profile to \"%v\" profile, and saved temp mfa credentials to \"%v\" profile\n", profile, newSourceProfileName, profile)
-		fmt.Println("output file:" + awsCredentialFilePath)
+		tempCreds := getTempCredentials(mfaDevice, mfaCode, awsCredINI.path, profile)
+		writeCredentialsToSection(oldCredProfileSection, tempCreds) // todo, fix uo?
+
+		awsCredINI.save()
+
+		// config file
+		err = awsConfigINI.copyINISection(profile, "mfa-"+profile)
+
+		if err != nil {
+			log.Fatal("ERROR copying config sections: ", err) // todo
+		}
+
+		awsConfigINI.save()
+		fmt.Printf("\nSuccessfully copied \"%v\" profile to \"%v\" profile, and saved temp mfa credentials to \"%v\" profile\n", profile, "mfa-"+profile, profile)
+		fmt.Println("output file:" + awsCredINI.path)
 	}
+
+}
+
+func getIniFile(filePath string) iniFile {
+	iniobj, err := ini.Load(filePath)
+	if err != nil {
+		log.Fatal(fmt.Errorf("error opening credentials file: %v", err))
+	}
+
+	return iniFile{
+		path: filePath,
+		file: iniobj,
+	}
+}
+
+type iniFile struct {
+	path string
+	file *ini.File
+}
+
+func (i iniFile) save() {
+	err := i.file.SaveTo(i.path)
+	if err != nil {
+		log.Fatal("ERROR saving file: ", i.path, err)
+	}
+}
+
+func (i iniFile) copyINISection(sourceSectionName string, targetSectionName string) error {
+	sourceSection := i.file.Section(sourceSectionName)
+	targetSection := i.file.Section(targetSectionName)
+	for k, v := range sourceSection.KeysHash() {
+		_, err := targetSection.NewKey(k, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func getTempCredentials(mfaDevice string, mfaCode string, awsCredentialFilePath string, profile string) *sts.Credentials {
@@ -179,15 +206,6 @@ func stringInSlice(a string, list []string) bool {
 		}
 	}
 	return false
-}
-func copyINISection(sourceSection *ini.Section, targetSection *ini.Section) error {
-	for k, v := range sourceSection.KeysHash() {
-		_, err := targetSection.NewKey(k, v)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func getDefaultProfile(awsCredINI *ini.File) string {
