@@ -8,7 +8,20 @@ It does this by rewriting your AWS config and credentials files, so that the cha
 
 ## Installation
 
----
+### install binary
+`go get github.com/AmsayIbbonsgay/aws-mfa`
+
+### create an mfa-cfg.csv file
+
+You need to tell the script the MFA device to use.
+To do this, create a file called `mfa-cfg.csv` in your `.aws` folder.
+This is `~/.aws` on mac, and `%UserProfile%` on windows.
+
+This file needs to be in the format:
+`$PROFILE_NAME="$MFA_DEVICE_ARN"`
+
+for example:
+`default="arn:aws:iam::834561414473:mfa/jane.doe"`
 
 ## Usage
 

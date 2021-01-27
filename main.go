@@ -134,7 +134,7 @@ func getArgs(awsCredINI *ini.File) (profile string, mfaCode string, mfaDevice st
 	args := flag.Args()
 
 	usageString := `Usage: mfa [profile] <mfa-code>
-where <mfa-code> is a 6 digit mfa code, likely from your mobile device or 1password`
+where <mfa-code> is a 6 digit mfa code, likely from your authenticator app,  password manager, or hardware authentication device`
 
 	argNum := len(args)
 	switch {
