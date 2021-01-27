@@ -228,17 +228,41 @@ func validateMFACode(mfaCode string) error {
 	return nil
 }
 
-func getMFADevice(profile string) string {
+func getMFAConfigFilePath() string {
 
+	// if AWS_MFA_CONFIG_FILE set, use that
+	val, present := os.LookupEnv("AWS_MFA_CONFIG_FILE")
+
+	if present {
+		return val
+	}
+
+	// next, check in the same dir as the executable
 	ex, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
 	}
 	exPath := filepath.Dir(ex)
 
-	configFile := exPath + mfaConfig
+	localfile := exPath + mfaConfig
+	if _, err := os.Stat(localfile); err == nil {
+		return localfile
+	}
 
-	f, err := os.Open(configFile)
+	// finally, check in ~/.aws/mfa-cfg.csv
+	homeDir, err := os.UserHomeDir()
+
+	if err != nil {
+		log.Fatal("Error finding user homedir: ", err)
+	}
+
+	return homeDir + "/.aws +" + mfaConfig
+}
+
+func getMFADevice(profile string) string {
+
+	configFilePath := getMFAConfigFilePath()
+	f, err := os.Open(configFilePath)
 
 	if err != nil {
 		log.Fatal(err)
@@ -256,6 +280,6 @@ func getMFADevice(profile string) string {
 		}
 	}
 
-	log.Fatal(fmt.Sprintf("profile %v not found in mfa config file %v ", profile, configFile))
+	log.Fatal(fmt.Sprintf("profile %v not found in mfa config file %v ", profile, configFilePath))
 	return "" // for make compiler happy
 }
