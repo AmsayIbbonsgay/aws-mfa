@@ -25,8 +25,6 @@ func main() {
 
 	awsCredentialFilePath, awsConfigFilePath := getAWSFilePaths()
 
-	// fmt.Println(awsCredentialFilePath)
-
 	awsCredINI := getIniFile(awsCredentialFilePath)
 	awsConfigINI := getIniFile(awsConfigFilePath)
 
@@ -174,29 +172,26 @@ func getArgs(awsCredINI *ini.File) (profile string, mfaCode string, mfaDevice st
 	usageString := `Usage: mfa [profile] <mfa-code>
 where <mfa-code> is a 6 digit mfa code, likely from your mobile device or 1password`
 
-	//TODO, replace this with a switch statement for chrissakes
-
+	argNum := len(args)
+	switch {
 	// no args given, assume naive run
-	if len(args) == 0 {
+	case argNum == 0:
 		fmt.Println(usageString)
 		os.Exit(0)
-	}
-
 	// more than two, assume some mess up, scream
-	if len(args) > 2 {
+	case argNum > 2:
 		log.Fatal("Script can not take more than 2 args: " + usageString)
-	}
-
 	// 1 arg, assume default profile
-	if len(args) == 1 {
+	case argNum == 1:
 		fmt.Println("No profile given, using default profiles")
 		profile := getDefaultProfile(awsCredINI)
 
 		return profile, args[0], getMFADevice(profile)
+	// 2 args, profile name manually selected
+	default:
+		return args[0], args[1], getMFADevice(profile)
 	}
-
-	// profile name manually selected
-	return args[0], args[1], getMFADevice(profile)
+	return "", "", ""
 }
 
 func stringInSlice(a string, list []string) bool {
