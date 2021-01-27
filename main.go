@@ -256,7 +256,7 @@ func getMFAConfigFilePath() string {
 		log.Fatal("Error finding user homedir: ", err)
 	}
 
-	return homeDir + "/.aws +" + mfaConfig
+	return homeDir + "/.aws" + mfaConfig
 }
 
 func getMFADevice(profile string) string {
